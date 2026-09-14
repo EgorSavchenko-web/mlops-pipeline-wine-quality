@@ -1,0 +1,131 @@
+# Airflow stack - the automation layer of the assignment.
+#
+#   docker compose -f services/airflow/docker-compose.airflow.yml up -d --build
+#
+# Layout notes
+# ------------
+# * The whole repository is mounted at /opt/project, so a DAG run reads and
+#   writes the same data/ and models/ folders you see on your disk.
+# * /var/run/docker.sock is mounted so the deployment task can drive the host
+#   Docker daemon. The API and app containers are therefore siblings of the
+#   Airflow containers, not children of them, and their published ports land
+#   directly on localhost.
+# * The containers run as root purely so that the mounted Docker socket is
+#   writable on every host OS without hunting for the right group id. This is a
+#   local development stack, not a production deployment.
+name: pmldl-airflow
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: pmldl/airflow:2.10.5
+  user: "0:0"
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__WEBSERVER__SECRET_KEY: pmldl-assignment-1
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "15"
+    # Consumed by every script in the repository to locate the project root.
+    PROJECT_DIR: /opt/project
+    PYTHONUNBUFFERED: "1"
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ../..:/opt/project                      # the repository itself
+    - /var/run/docker.sock:/var/run/docker.sock
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pmldl-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # One-shot container: creates the metadata schema and the admin user, then
+  # exits. The long-running services wait for it to complete successfully.
+  airflow-init:
+    <<: *airflow-common
+    container_name: pmldl-airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create --role Admin --username admin --password admin \
+          --firstname Admin --lastname User --email admin@example.com || true
+        echo "airflow initialised"
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: pmldl-airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"          # http://localhost:8080  (admin / admin)
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: pmldl-airflow-scheduler
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Optional: browse the run history written by Stage 2 at http://localhost:5000
+  mlflow:
+    build:
+      context: ../mlflow
+      dockerfile: Dockerfile
+    image: pmldl/mlflow:2.17.2
+    container_name: pmldl-mlflow
+    # The store path must be identical to the one used inside the Airflow
+    # container, because MLflow records absolute artefact URIs.
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri file:///opt/project/mlruns
+      --default-artifact-root file:///opt/project/mlruns
+      --serve-artifacts
+    volumes:
+      - ../..:/opt/project
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

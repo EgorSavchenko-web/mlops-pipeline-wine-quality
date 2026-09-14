@@ -1,0 +1,2 @@
+This directory is produced by Stage 2 (code/models/train_model.py):
+model.pkl, model_card.json and metrics.json land here on every pipeline run.

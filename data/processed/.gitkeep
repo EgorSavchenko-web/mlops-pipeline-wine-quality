@@ -1,0 +1,2 @@
+This directory is produced by Stage 1 (code/datasets/prepare_data.py):
+train.csv, test.csv and data_report.json land here on every pipeline run.

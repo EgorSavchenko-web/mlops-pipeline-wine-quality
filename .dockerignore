@@ -1,0 +1,16 @@
+# The API/app build context is the whole repository, so everything that the
+# images do not need is excluded here. Without this the 5-minute rebuild would
+# ship the raw data, the MLflow store and the Airflow logs to the daemon on
+# every single run.
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+.ipynb_checkpoints
+notebooks/
+data/
+mlruns/
+reports/
+services/
+docs/
+*.md

@@ -1,0 +1,46 @@
+# Stage 3 - the two deployed services.
+#
+# Started by the Airflow DAG with:
+#     docker compose -f code/deployment/docker-compose.yml up -d --build
+#
+# Both build contexts are the repository root (`../..`), so the images can pull
+# in the model from models/ and the shared feature module from code/models/.
+name: pmldl
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: code/deployment/api/Dockerfile
+    image: pmldl-api:latest
+    container_name: pmldl-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"          # http://localhost:8000/docs
+    networks: [pmldl-net]
+
+  app:
+    build:
+      context: ../..
+      dockerfile: code/deployment/app/Dockerfile
+    image: pmldl-app:latest
+    container_name: pmldl-app
+    restart: unless-stopped
+    environment:
+      # Service-name DNS on the shared network - the app never touches
+      # localhost, which is what makes the two containers genuinely separate.
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"          # http://localhost:8501
+    depends_on:
+      api:
+        # Ordering only, not a gate. Waiting for `service_healthy` would mean a
+        # sick API takes the whole deployment down with it, and the one page
+        # that could show you what is wrong never starts. The app handles an
+        # unreachable API on its own and says so in the sidebar.
+        condition: service_started
+    networks: [pmldl-net]
+
+networks:
+  pmldl-net:
+    driver: bridge

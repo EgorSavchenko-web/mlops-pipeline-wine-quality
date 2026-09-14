@@ -1,0 +1,13 @@
+# The raw dataset is an input artefact: it must arrive byte-for-byte identical
+# on every machine. Without this, git's newline handling rewrites it on
+# checkout under Windows and every clone shows a 1 600-line phantom diff.
+data/raw/*.csv -text
+
+# Notebooks are JSON; keeping them binary-ish avoids merge drivers mangling
+# the embedded output payloads.
+*.ipynb -text
+
+# Shell scripts and Dockerfiles are consumed by Linux containers.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf

@@ -1,0 +1,14 @@
+# Pinned to match code/deployment/api/requirements.txt exactly, so that the
+# model pickled in Stage 2 is guaranteed to load in the API container.
+numpy==2.1.3
+pandas==2.2.3
+scikit-learn==1.5.2
+joblib==1.4.2
+# mlflow-skinny is the client-only distribution: it can log runs, parameters,
+# metrics and artefacts, but pulls none of the server/UI dependencies that
+# would fight with Airflow's own pinned Flask and SQLAlchemy.
+mlflow-skinny==2.17.2
+# mlflow-skinny 2.17.x would pull protobuf 5.x, which breaks the
+# opentelemetry-proto 1.27 that Airflow 2.10.5 ships with (it requires
+# protobuf<5). 4.25.8 satisfies both (and databricks-sdk, pulled in by mlflow), so it is pinned explicitly.
+protobuf==4.25.8

@@ -1,0 +1,33 @@
+# Python libraries required by the pipeline.
+#
+# The pipeline itself runs inside containers, which install from the three
+# narrower files listed below. This file is the union of those, and is what you
+# install into a local virtual environment to run the notebook or to execute a
+# stage by hand:
+#
+#     python -m venv .venv && .venv\Scripts\activate      (Windows)
+#     pip install -r requirements.txt
+#
+# Per-image dependency lists:
+#   services/airflow/requirements-airflow.txt   Stages 1-2 inside Airflow
+#   code/deployment/api/requirements.txt        the model API image
+#   code/deployment/app/requirements.txt        the Streamlit app image
+
+# --- Stage 1 & 2: data and model engineering ---
+numpy==2.1.3
+pandas==2.2.3
+scikit-learn==1.5.2
+joblib==1.4.2
+mlflow-skinny==2.17.2
+protobuf==4.25.8
+
+# --- Stage 3: serving ---
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+streamlit==1.40.2
+requests==2.32.3
+
+# --- notebooks only ---
+jupyter==1.1.1
+matplotlib==3.9.2
