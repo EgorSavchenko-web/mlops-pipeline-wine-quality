@@ -200,7 +200,10 @@ data_engineering → model_engineering → deploy_api_and_app → smoke_test →
 
 `schedule="*/5 * * * *"`, `catchup=False`, `max_active_runs=1` (a slow run
 delays the next one rather than stacking concurrent Docker builds),
-`dagrun_timeout=10 min`.
+`dagrun_timeout=20 min`. The timeout is deliberately generous, because when it
+fires Airflow marks the run's unfinished tasks **skipped** rather than failed —
+the pink cells in the grid view — and a cold first build on a new machine
+legitimately takes several minutes.
 
 Stages 1 and 2 run as **separate processes** rather than being imported into
 the worker. Beyond keeping the repository's top-level `code/` directory from
@@ -215,9 +218,16 @@ otherwise surfaces in Airflow as the single word `unhealthy`.
 
 `smoke_test` is the proof that the deployment really works: it waits for the API
 container to answer, then runs a prediction **from inside the app container**,
-addressed to the api container over the shared Docker network. `prune` deletes
-the untagged images the rebuild orphans, which would otherwise grow by
-gigabytes over a day of 5-minute runs.
+addressed to the api container over the shared Docker network.
+
+`prune` deletes the untagged images the rebuild orphans, which would otherwise
+grow by gigabytes over a day of 5-minute runs — but only those older than a day.
+That filter matters: Compose falls back to the classic builder here, and the
+classic builder keeps its layer cache **as untagged intermediate images**, which
+an unfiltered prune would delete. The cost of getting this wrong is measurable —
+a build with the cache evicted reinstalls scikit-learn, scipy and streamlit from
+PyPI and takes two to nine minutes, against roughly twenty seconds with the cache
+intact.
 
 ## 7. Troubleshooting
 
@@ -232,6 +242,7 @@ gigabytes over a day of 5-minute runs.
 | Containers die or restart at random | Docker Desktop → Settings → Resources → Memory. Airflow, Postgres, MLflow and the two deployment containers need roughly 6 GB between them. |
 | `apache/airflow:2.10.5-python3.11` not found | Use `2.10.5-python3.12` — the pinned libraries support it too. |
 | API image build fails on `COPY models/model.pkl` | Stage 2 has not run yet. Either trigger the DAG (which runs the stages in order) or run `python code/models/train_model.py` first. |
+| Tasks show up **pink** (skipped) in the grid view | The run hit `dagrun_timeout`; Airflow skips whatever has not finished. Check how long `deploy_api_and_app` took — if it is minutes rather than seconds, the Docker layer cache is being evicted and every build is reinstalling the scientific stack from PyPI. |
 | Streamlit says *API unreachable* | The `api` container is still starting; the app waits for its healthcheck, so simply reload in 20 s. |
 
 ## 8. Grading checklist

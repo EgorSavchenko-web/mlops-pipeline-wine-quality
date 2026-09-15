@@ -125,7 +125,12 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     catchup=False,
     max_active_runs=1,
-    dagrun_timeout=timedelta(minutes=10),
+    # Generous on purpose. A warm-cache run finishes in well under a minute,
+    # but the very first run on a new machine builds both images from scratch
+    # and legitimately takes several minutes. When this timeout fires, Airflow
+    # marks the unfinished tasks SKIPPED rather than failed - the pink cells in
+    # the grid view - so too tight a value makes a healthy pipeline look broken.
+    dagrun_timeout=timedelta(minutes=20),
     default_args={
         "owner": "pmldl",
         "retries": 1,
@@ -242,13 +247,21 @@ echo "app is reachable at http://localhost:8501, API docs at http://localhost:80
         doc_md="End-to-end check: app container -> API container -> prediction.",
     )
 
-    # Every run produces a new API image and orphans the previous one. Without
-    # this the untagged layers accumulate by gigabytes over a day of 5-minute
-    # runs. Only dangling (untagged, unreferenced) images are touched.
+    # Every run produces a new API image and orphans the previous one, so the
+    # untagged layers have to be collected or they accumulate by the gigabyte.
+    #
+    # The `until` filter is not optional tuning. Compose falls back to the
+    # classic builder here, and the classic builder keeps its layer cache AS
+    # untagged intermediate images - exactly what an unfiltered prune deletes.
+    # Without the filter every following build reinstalls scikit-learn, scipy
+    # and streamlit from PyPI: measured at 2-9 minutes per run against roughly
+    # 20 seconds with a warm cache, which is what pushed runs past the DAG
+    # timeout. Keeping anything created in the last day preserves the cache and
+    # still collects the genuinely stale layers.
     prune = BashOperator(
         task_id="prune_dangling_images",
-        bash_command="docker image prune -f",
-        doc_md="Housekeeping: drop the untagged images left behind by the rebuild.",
+        bash_command='docker image prune -f --filter "until=24h"',
+        doc_md="Housekeeping: drop stale untagged images without evicting the build cache.",
     )
 
     data_engineering >> model_engineering >> deploy >> smoke_test >> prune
